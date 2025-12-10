@@ -1,0 +1,534 @@
+---
+alwaysApply: false
+description: "Entity에만 적용되는 규칙"
+globs: src/main/java/**/entity/*.java
+---
+
+# Entity 작성 규칙
+
+## 1. 기본 구조
+
+### 필수 어노테이션
+```java
+@Entity
+@Table(name = "sample")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Sample extends BaseEntity {
+    @Id
+    @DwlfIdStrategy(tableCode = "SPL")
+    private String sampleId;
+    
+    @Column(name = "sample_name", nullable = false, length = 100)
+    private String sampleName;
+}
+```
+
+### 기본 원칙
+1. **DB 스키마 우선**
+   - DBA가 설계한 테이블 스키마를 반드시 따름
+   - 컬럼 타입, 길이, 제약조건 등 모두 DB 스키마와 정확히 일치
+   - PK 전략도 DB 스키마에 따라 선택 (CHAR(15) → @DwlfIdStrategy, INTEGER → AUTO_INCREMENT)
+
+2. **BaseEntity 상속 필수**
+   - 공통 필드 자동 제공 (statusCode, createDatetime, updateDatetime 등)
+   - 논리 삭제 메서드 `delete()` 제공
+
+3. **불변성 지향**
+   - `@Getter`만 사용 (`@Setter` 지양)
+   - `@NoArgsConstructor(access = AccessLevel.PROTECTED)` 사용
+   - 비즈니스 메서드로 상태 변경
+
+4. **테이블 매핑**
+   - `@Table(name = "테이블명")` 명시 (DB 테이블명과 정확히 일치)
+   - Java 멤버변수는 camelCase, 컬럼명은 DB 스키마와 일치하게 매핑
+
+## 2. BaseEntity 상속
+
+### BaseEntity가 제공하는 필드
+```java
+@MappedSuperclass
+public abstract class BaseEntity {
+    private StatusCode statusCode;           // 상태 코드 (ACTIVE, INACTIVE, DELETED 등)
+    private LocalDateTime createDatetime;    // 등록일시 (자동)
+    private LocalDateTime updateDatetime;    // 수정일시 (자동)
+    private String createMemberNo;           // 등록자 번호 (자동)
+    private String updateMemberNo;           // 수정자 번호 (자동)
+    
+    public void delete() {                   // 논리 삭제 메서드
+        this.setStatusCode(StatusCode.DELETED);
+    }
+}
+```
+
+### 특징
+- **자동 감사(Auditing)**: 생성/수정 일시 및 사용자 자동 설정
+- **논리 삭제 지원**: `delete()` 메서드로 상태 변경
+- **기본 상태 코드**: `@PrePersist`로 저장 시 자동으로 `ACTIVE` 설정
+
+## 3. ID 생성 전략 (테이블 스키마에 따라 선택)
+
+**중요**: PK 전략은 이미 생성된 테이블의 스키마를 반드시 따릅니다.
+
+### 케이스 1: PK가 CHAR(15)인 경우
+테이블 스키마에서 PK가 `CHAR(15)` 타입인 경우 **@DwlfIdStrategy 사용**
+
+```java
+@Id
+@GeneratedValue
+@DwlfIdStrategy(tableCode = "SPL")
+@Column(name = "sample_id", length = 15)
+private String sampleId;
+```
+- **커스텀 ID 생성 전략**
+- 형식: `{tableCode(3자리)}{NanoID(12자리)}` = 총 15자리
+- 예: `SPLa1B2c3D4e5F6`
+- tableCode는 영문 대문자, 숫자만 가능 (최대 3자리, 자동으로 대문자 변환 및 3자리로 자름)
+- NanoID는 URL-safe한 랜덤 문자열 (영문 대소문자, 숫자)
+- DB 컬럼: `sample_id CHAR(15)`
+
+### 케이스 2: PK가 INTEGER (AUTO_INCREMENT)인 경우
+테이블 스키마에서 PK가 `INTEGER AUTO_INCREMENT`인 경우 **@GeneratedValue(IDENTITY) 사용**
+
+```java
+@Id
+@GeneratedValue(strategy = GenerationType.IDENTITY)
+@Column(name = "sample_seq_no", nullable = false)
+private Integer sampleSeqNo;
+```
+- **DB의 AUTO_INCREMENT 사용**
+- Integer 타입 사용
+- 예: `1`, `2`, `3`, ... (DB가 자동 증가)
+- DB 컬럼: `sample_seq_no INTEGER AUTO_INCREMENT`
+
+## 4. 컬럼 매핑 (DB 스키마 준수 필수)
+
+**중요**: 모든 컬럼 속성은 DB 스키마와 정확히 일치해야 합니다.
+
+### 기본 컬럼
+```java
+// DB: sample_name VARCHAR(100) NOT NULL
+@Column(name = "sample_name", nullable = false, length = 100)
+private String sampleName;
+
+// DB: description VARCHAR(1000)
+@Column(name = "description", length = 1000)
+private String description;
+
+// DB: sort_order INTEGER
+@Column(name = "sort_order")
+private Integer sortOrder;
+```
+
+### 속성 (모두 DB 스키마 기준)
+- `name`: DB 컬럼명 (DB 스키마와 정확히 일치 필수)
+- `nullable`: DB의 NOT NULL 제약조건과 일치
+- `length`: DB의 VARCHAR 길이와 일치
+- `unique`: DB의 UNIQUE 제약조건과 일치
+
+### 제약조건 예시
+```java
+// DB: sample_code VARCHAR(20) NOT NULL UNIQUE
+@Column(name = "sample_code", nullable = false, length = 20, unique = true)
+private String sampleCode;
+```
+
+### 주의사항
+- 컬럼명, 타입, 길이, 제약조건 모두 DB 스키마와 일치시켜야 함
+- DB 스키마 변경 시 Entity도 함께 수정 필요
+
+## 5. 연관관계 매핑 (DB 외래키 설계 기준)
+
+**중요**: 연관관계는 DB의 외래키(Foreign Key) 설계를 따릅니다.
+
+### @OneToMany (1:N)
+```java
+// DB에 parent_id 외래키가 있는 경우
+@OneToMany(mappedBy = "parentId", fetch = FetchType.LAZY)
+private List<Child> children = new ArrayList<>();
+```
+- `mappedBy`: 연관관계 주인 필드명 (DB FK 컬럼에 해당하는 필드)
+- `fetch = FetchType.LAZY`: 지연 로딩 (필수)
+- `new ArrayList<>()`: NPE 방지
+
+### @OneToOne (1:1)
+```java
+// DB에 file_group_id 컬럼이 있는 경우
+@OneToOne(fetch = FetchType.LAZY)
+@JoinColumn(
+    name = "file_group_id",              // DB FK 컬럼명
+    referencedColumnName = "file_group_id",  // 참조 테이블의 PK 컬럼명
+    insertable = false,
+    updatable = false
+)
+private FileGroup fileGroup;
+```
+- `name`: DB의 FK 컬럼명과 일치
+- `insertable = false, updatable = false`: 읽기 전용
+
+### @ManyToOne (N:1)
+```java
+// DB에 parent_id FK가 있는 경우
+@ManyToOne(fetch = FetchType.LAZY)
+@JoinColumn(name = "parent_id")  // DB FK 컬럼명과 일치
+private Parent parent;
+```
+- `name`: DB의 FK 컬럼명과 정확히 일치
+
+## 6. @SQLRestriction (삭제 데이터 자동 제외)
+
+### 사용법
+```java
+@Entity
+@Table(name = "sample")
+@SQLRestriction(StatusCode.WHERE_CLAUS.SELECT_ONLY_ACTIVE_AND_ARCHIVED_AND_INACTIVE)
+public class Sample extends BaseEntity {
+    // ...
+}
+```
+
+### 효과
+- JPA Repository, QueryDSL 조회 시 **자동으로 DELETED 상태 제외**
+- `WHERE status_code IN ('ACTIVE', 'INACTIVE', 'ARCHIVED')` 자동 추가
+
+### 주의사항
+- DELETED 포함 조회가 필요한 경우 Native Query 사용
+```java
+@Query(value = "SELECT * FROM sample WHERE sample_id = :id", nativeQuery = true)
+Optional<Sample> findByIdAllStatus(@Param("id") String id);
+```
+
+## 7. 생성자 및 빌더 (선택사항)
+
+Entity 생성 방식은 팀 컨벤션에 따라 선택합니다. (DB 스키마와 무관)
+
+### @Builder 패턴
+```java
+@Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Sample extends BaseEntity {
+    @Id
+    @DwlfIdStrategy(tableCode = "SPL")
+    private String sampleId;
+    
+    @Column(name = "sample_name", nullable = false, length = 100)
+    private String sampleName;
+    
+    @Column(name = "description", length = 1000)
+    private String description;
+    
+    @Builder
+    private Sample(String sampleName, String description) {
+        this.sampleName = sampleName;
+        this.description = description;
+    }
+}
+```
+
+### 수동 생성
+```java
+@Entity
+@Getter
+@NoArgsConstructor
+public class Sample extends BaseEntity {
+    // 필드 생략
+    
+    public static Sample from(SampleCreateRequestDto dto) {
+        Sample sample = new Sample();
+        sample.sampleName = dto.getSampleName();
+        sample.description = dto.getDescription();
+        sample.setStatusCode(StatusCode.fromValue(dto.getStatusCode()));
+        return sample;
+    }
+}
+```
+
+## 8. 정적 팩토리 메서드
+
+### from() 메서드 (DTO → Entity)
+```java
+public static Sample from(SampleCreateRequestDto dto) {
+    return Sample.builder()
+        .sampleName(dto.getSampleName())
+        .description(dto.getDescription())
+        .build();
+}
+```
+
+### 여러 정적 팩토리 메서드
+```java
+// 생성용
+public static Sample fromCreate(SampleCreateRequestDto dto) {
+    Sample sample = new Sample();
+    sample.sampleName = dto.getSampleName();
+    sample.setStatusCode(StatusCode.ACTIVE);
+    return sample;
+}
+
+// 수정용
+public static Sample fromUpdate(SampleUpdateRequestDto dto, String sampleId) {
+    Sample sample = new Sample();
+    sample.sampleId = sampleId;
+    sample.sampleName = dto.getSampleName();
+    return sample;
+}
+```
+
+## 9. 비즈니스 메서드
+
+### update() 메서드 (Dirty Checking)
+```java
+public void update(SampleUpdateRequestDto dto) {
+    this.sampleName = dto.getSampleName();
+    this.description = dto.getDescription();
+    this.sortOrder = dto.getSortOrder();
+}
+```
+
+### 상태 변경 메서드
+```java
+public void updateVisibility(SampleVisibilityRequestDto dto) {
+    this.setStatusCode(StatusCode.fromValue(dto.getStatusCode()));
+}
+
+public void activate() {
+    this.setStatusCode(StatusCode.ACTIVE);
+}
+
+public void deactivate() {
+    this.setStatusCode(StatusCode.INACTIVE);
+}
+```
+
+### 도메인 로직 메서드
+```java
+public boolean isActive() {
+    return this.getStatusCode() == StatusCode.ACTIVE;
+}
+
+public boolean isDeleted() {
+    return this.getStatusCode() == StatusCode.DELETED;
+}
+```
+
+## 10. 실제 예시
+
+### 예시 1: PK가 CHAR(15)인 경우 (@DwlfIdStrategy 사용)
+
+**DB 스키마**:
+```sql
+CREATE TABLE sample (
+    sample_id CHAR(15) PRIMARY KEY,
+    sample_code VARCHAR(20) NOT NULL UNIQUE,
+    sample_name VARCHAR(100) NOT NULL,
+    description VARCHAR(1000),
+    parent_id CHAR(15)
+);
+```
+
+**Entity 코드**:
+```java
+@Entity
+@Table(name = "sample")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@SQLRestriction(StatusCode.WHERE_CLAUS.SELECT_ONLY_ACTIVE_AND_ARCHIVED_AND_INACTIVE)
+public class Sample extends BaseEntity {
+    
+    @Id
+    @GeneratedValue
+    @DwlfIdStrategy(tableCode = "SPL")
+    private String sampleId;
+    
+    @Column(name = "sample_code", nullable = false, length = 20, unique = true)
+    private String sampleCode;
+    
+    @Column(name = "sample_name", nullable = false, length = 100)
+    private String sampleName;
+    
+    @Column(name = "description", length = 1000)
+    private String description;
+    
+    @Column(name = "parent_id", length = 15)
+    private String parentId;
+    
+    @OneToMany(mappedBy = "parentId", fetch = FetchType.LAZY)
+    private List<SampleChild> children = new ArrayList<>();
+    
+    @Builder
+    private Sample(String sampleCode, String sampleName, String description, String parentId) {
+        this.sampleCode = sampleCode;
+        this.sampleName = sampleName;
+        this.description = description;
+        this.parentId = parentId;
+    }
+    
+    public static Sample from(SampleCreateRequestDto dto) {
+        return Sample.builder()
+            .sampleCode(dto.getSampleCode())
+            .sampleName(dto.getSampleName())
+            .description(dto.getDescription())
+            .parentId(dto.getParentId())
+            .build();
+    }
+    
+    public void update(SampleUpdateRequestDto dto) {
+        this.sampleCode = dto.getSampleCode();
+        this.sampleName = dto.getSampleName();
+        this.description = dto.getDescription();
+    }
+}
+```
+
+### 예시 2: PK가 INTEGER AUTO_INCREMENT인 경우
+
+**DB 스키마**:
+```sql
+CREATE TABLE sample (
+    sample_seq_no INTEGER AUTO_INCREMENT PRIMARY KEY,
+    workspace_id CHAR(15) NOT NULL,
+    sample_name VARCHAR(100) NOT NULL,
+    uri_path VARCHAR(200),
+    sort_order INTEGER
+);
+```
+
+**Entity 코드**:
+```java
+@Entity
+@Getter
+@Table(name = "sample")
+@SQLRestriction(StatusCode.WHERE_CLAUS.SELECT_ONLY_ACTIVE_AND_ARCHIVED_AND_INACTIVE)
+@NoArgsConstructor
+public class Sample extends BaseEntity {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "sample_seq_no", nullable = false)
+    private Integer sampleSeqNo;
+    
+    @Column(name = "workspace_id", nullable = false, length = 15)
+    private String workspaceId;
+    
+    @Column(name = "sample_name", nullable = false, length = 100)
+    private String sampleName;
+    
+    @Column(name = "uri_path", length = 200)
+    private String uriPath;
+    
+    @Column(name = "sort_order")
+    private Integer sortOrder;
+    
+    public static Sample from(SampleCreateRequestDto dto) {
+        Sample sample = new Sample();
+        sample.workspaceId = dto.getWorkspaceId();
+        sample.sampleName = dto.getSampleName();
+        sample.uriPath = dto.getUriPath();
+        sample.sortOrder = dto.getSortOrder();
+        sample.setStatusCode(StatusCode.fromValue(dto.getStatusCode()));
+        return sample;
+    }
+    
+    public void update(SampleUpdateRequestDto dto) {
+        this.workspaceId = dto.getWorkspaceId();
+        this.sampleName = dto.getSampleName();
+        this.uriPath = dto.getUriPath();
+        this.sortOrder = dto.getSortOrder();
+    }
+    
+    public void updateVisibility(SampleVisibilityRequestDto dto) {
+        this.setStatusCode(StatusCode.fromValue(dto.getStatusCode()));
+    }
+}
+```
+
+## 11. 주의사항
+
+### @Setter 사용 지양
+```java
+// ❌ 지양
+@Setter
+public class Sample extends BaseEntity {
+    private String sampleName;
+}
+
+// ✅ 권장
+public class Sample extends BaseEntity {
+    private String sampleName;
+    
+    public void update(SampleUpdateRequestDto dto) {
+        this.sampleName = dto.getSampleName();
+    }
+}
+```
+
+### 연관관계 LAZY 로딩 필수
+```java
+// ❌ 금지
+@OneToMany(mappedBy = "parentId", fetch = FetchType.EAGER)
+private List<Child> children;
+
+// ✅ 필수
+@OneToMany(mappedBy = "parentId", fetch = FetchType.LAZY)
+private List<Child> children = new ArrayList<>();
+```
+
+### BaseEntity 필드 직접 선언 금지
+```java
+// ❌ 금지 (BaseEntity에서 제공)
+@Column(name = "status_code")
+private String statusCode;
+
+@Column(name = "create_datetime")
+private LocalDateTime createDatetime;
+
+// ✅ BaseEntity 상속으로 자동 제공됨
+public class Sample extends BaseEntity {
+    // statusCode, createDatetime 등은 BaseEntity에서 상속받음
+}
+```
+
+### 논리 삭제 사용
+```java
+// ✅ 권장 (BaseEntity의 delete() 사용)
+public void deleteSample() {
+    this.delete();  // statusCode를 DELETED로 변경
+}
+
+// ❌ 물리 삭제는 특별한 경우에만
+repository.delete(sample);  // 가급적 사용하지 않음
+```
+
+### StatusCode 변환
+```java
+// StatusCode enum 사용
+this.setStatusCode(StatusCode.ACTIVE);
+this.setStatusCode(StatusCode.INACTIVE);
+
+// String 값으로부터 변환
+this.setStatusCode(StatusCode.fromValue(dto.getStatusCode()));
+```
+
+### 네이밍 규칙 (DB 스키마 준수 필수)
+```java
+// ✅ Java 멤버변수는 camelCase, @Column의 name은 DB 스키마와 정확히 일치
+@Column(name = "sample_name")    // DB 컬럼명 (DB 스키마 그대로)
+private String sampleName;       // Java 변수명 (camelCase)
+
+@Column(name = "parent_id")      // DB 컬럼명 (DB 스키마 그대로)
+private String parentId;         // Java 변수명 (camelCase)
+
+// ❌ @Column의 name을 DB와 다르게 작성 금지
+@Column(name = "sampleName")     // 금지: DB에 sample_name으로 정의됨
+private String sampleName;
+
+@Column(name = "SAMPLE_NAME")    // 금지: DB에 sample_name으로 정의됨 (대소문자 포함)
+private String sampleName;
+
+// ❌ Java 변수를 snake_case로 작성 금지
+@Column(name = "sample_name")
+private String sample_name;      // 금지: Java 네이밍 규칙 위반
+```
+
+**핵심**: `@Column(name = "...")` 값은 반드시 DB 스키마의 컬럼명과 정확히 일치해야 합니다.

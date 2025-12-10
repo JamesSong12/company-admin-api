@@ -1,0 +1,447 @@
+---
+alwaysApply: false
+description: "Dto에만 적용되는 규칙"
+globs: src/main/java/**/model/*Dto.java
+---
+
+# DTO 작성 규칙
+
+## 1. DTO 분류 및 네이밍
+
+### DTO 종류별 네이밍 규칙
+```
+{Domain}{Purpose}{Type}Dto
+
+- Domain: 도메인명 (Sample, User, Order 등)
+- Purpose: 용도 (Create, Update, Search 등)
+- Type: Request 또는 Response
+```
+
+### 주요 DTO 타입
+```java
+// 생성 요청
+SampleCreateRequestDto
+
+// 수정 요청
+SampleUpdateRequestDto
+
+// 검색 요청
+SampleSearchRequestDto
+
+// 응답 (단건/목록 공통)
+SampleResponseDto
+
+// 특수 목적 응답
+SampleVisibilityResponseDto
+```
+
+## 2. ResponseDto (응답용)
+
+### 기본 구조
+```java
+@Getter
+@Builder
+public class SampleResponseDto {
+    private String sampleId;
+    private String sampleName;
+    private StatusCode statusCode;
+    private LocalDateTime createDatetime;
+    private LocalDateTime updateDatetime;
+    
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String updateMemberId;
+    
+    // Entity → DTO 변환 (정적 팩토리 메서드)
+    public static SampleResponseDto from(Sample entity) {
+        return SampleResponseDto.builder()
+            .sampleId(entity.getSampleId())
+            .sampleName(entity.getSampleName())
+            .statusCode(entity.getStatusCode())
+            .createDatetime(entity.getCreateDatetime())
+            .updateDatetime(entity.getUpdateDatetime())
+            .build();
+    }
+}
+```
+
+### 필수 요소
+1. **Lombok 어노테이션**
+   - `@Getter`: 필수
+   - `@Builder`: 필수 (빌더 패턴으로 생성)
+
+2. **정적 팩토리 메서드 from()**
+   - Entity → DTO 변환
+   - 오버로딩으로 추가 파라미터 지원 가능
+
+3. **@JsonInclude (선택적 필드)**
+   - null 값을 JSON에서 제외하고 싶은 필드에 사용
+
+### 정적 팩토리 메서드 패턴
+
+#### 기본 패턴
+```java
+public static SampleResponseDto from(Sample entity) {
+    return SampleResponseDto.builder()
+        .sampleId(entity.getSampleId())
+        .sampleName(entity.getSampleName())
+        .statusCode(entity.getStatusCode())
+        .build();
+}
+```
+
+#### 추가 파라미터 패턴 (오버로딩)
+```java
+// 기본
+public static SampleResponseDto from(Sample entity) {
+    return SampleResponseDto.from(entity, null);
+}
+
+// 추가 정보 포함
+public static SampleResponseDto from(Sample entity, String updateMemberId) {
+    return SampleResponseDto.builder()
+        .sampleId(entity.getSampleId())
+        .sampleName(entity.getSampleName())
+        .updateMemberId(updateMemberId)  // 외부에서 받은 추가 정보
+        .build();
+}
+```
+
+## 3. CreateRequestDto (생성 요청용)
+
+### 기본 구조
+```java
+@Getter
+@AllArgsConstructor
+@ToString
+public class SampleCreateRequestDto {
+    @NotBlank
+    private String sampleName;
+    
+    @NotNull
+    private String description;
+    
+    private String optionalField;  // 검증 없는 선택 필드
+}
+```
+
+### 필수 요소
+1. **Lombok 어노테이션**
+   - `@Getter`: 필수
+   - `@AllArgsConstructor`: 모든 필드를 받는 생성자
+   - `@ToString`: 디버깅용
+
+2. **검증 어노테이션 (Bean Validation)**
+   - `@NotBlank`: 문자열 필수 (null, "", " " 모두 불가)
+   - `@NotNull`: null 불가 (빈 문자열은 허용)
+   - `@NotEmpty`: Collection/Array가 비어있지 않음
+   - `@Size`: 크기 제한
+   - `@Min`, `@Max`: 숫자 범위
+   - `@Email`, `@Pattern`: 형식 검증
+
+### 검증 어노테이션 예시
+```java
+@Getter
+@AllArgsConstructor
+public class SampleCreateRequestDto {
+    @NotBlank
+    private String sampleName;
+    
+    @NotNull
+    @Size(min = 1, max = 1000)
+    private String description;
+    
+    @Min(0)
+    @Max(999)
+    private Integer sortOrder;
+    
+    @Email
+    private String email;
+    
+    @Pattern(regexp = "^[A-Z0-9]+$")
+    private String code;
+}
+```
+
+## 4. UpdateRequestDto (수정 요청용)
+
+### 기본 구조
+```java
+@Getter
+@AllArgsConstructor
+@ToString
+public class SampleUpdateRequestDto {
+    @NotBlank
+    private String sampleName;
+    
+    @NotNull
+    private String description;
+}
+```
+
+### 특징
+- CreateRequestDto와 구조가 유사
+- 필요한 필드만 포함 (ID는 PathVariable로 받으므로 제외)
+- 검증 규칙은 CreateRequestDto와 동일하게 적용
+
+## 5. SearchRequestDto (검색 요청용)
+
+### 기본 구조
+```java
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+public class SampleSearchRequestDto {
+    private String keyword;
+    
+    private Sort.Direction direction = Sort.Direction.ASC;
+    
+    private List<SearchableColumn> searchTargetColumns = 
+        List.of(SearchableColumn.SAMPLE_ID, SearchableColumn.SAMPLE_NAME);
+    
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+    private List<LocalDate> createDate;
+    
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+    private List<LocalDate> updateDate;
+    
+    public enum SearchableColumn {
+        SAMPLE_ID,
+        SAMPLE_NAME,
+        DESCRIPTION
+    }
+}
+```
+
+### 필수 요소
+1. **Lombok 어노테이션**
+   - `@Getter`, `@Setter`: 둘 다 필수 (바인딩을 위해)
+   - `@NoArgsConstructor`: 기본 생성자 (필수)
+   - `@AllArgsConstructor`: 전체 생성자 (선택)
+
+2. **기본값 설정**
+   - 정렬 방향: `Sort.Direction.ASC`
+   - 검색 대상 컬럼: 기본 리스트
+
+3. **@DateTimeFormat**
+   - 날짜 파라미터에 필수
+   - ISO 형식 사용 권장
+
+4. **SearchableColumn enum**
+   - 검색 가능한 컬럼을 enum으로 정의
+   - Repository에서 동적 쿼리 작성 시 사용
+
+## 6. 실제 예시
+
+### 예시 1: ResponseDto (외부 API 호출 포함)
+```java
+@Getter
+@Builder
+public class SampleResponseDto {
+    private String sampleId;
+    private String sampleCode;
+    private String sampleName;
+    private StatusCode statusCode;
+    private LocalDateTime createDatetime;
+    private LocalDateTime updateDatetime;
+    
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String updateMemberId;  // 외부 API에서 조회한 정보
+    
+    // 기본 변환
+    public static SampleResponseDto from(Sample entity) {
+        return SampleResponseDto.from(entity, null);
+    }
+    
+    // 외부 정보 포함 변환
+    public static SampleResponseDto from(Sample entity, String updateMemberId) {
+        return SampleResponseDto.builder()
+            .sampleId(entity.getSampleId())
+            .sampleCode(entity.getSampleCode())
+            .sampleName(entity.getSampleName())
+            .statusCode(entity.getStatusCode())
+            .createDatetime(entity.getCreateDatetime())
+            .updateDatetime(entity.getUpdateDatetime())
+            .updateMemberId(updateMemberId)
+            .build();
+    }
+}
+```
+
+### 예시 2: CreateRequestDto
+```java
+@Getter
+@AllArgsConstructor
+@ToString
+public class SampleCreateRequestDto {
+    @NotBlank
+    private String sampleCode;
+    
+    @NotBlank
+    private String sampleName;
+    
+    @NotNull
+    private String description;
+}
+```
+
+### 예시 3: UpdateRequestDto
+```java
+@Getter
+@AllArgsConstructor
+@ToString
+public class SampleUpdateRequestDto {
+    @NotBlank
+    private String sampleCode;
+    
+    @NotBlank
+    private String sampleName;
+    
+    @NotNull
+    private String description;
+}
+```
+
+### 예시 4: SearchRequestDto
+```java
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+public class SampleSearchRequestDto {
+    private String keyword;
+    
+    private Sort.Direction direction = Sort.Direction.ASC;
+    
+    private List<SearchableColumn> searchTargetColumns = 
+        List.of(
+            SearchableColumn.SAMPLE_CODE, 
+            SearchableColumn.SAMPLE_NAME, 
+            SearchableColumn.DESCRIPTION
+        );
+    
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+    private List<LocalDate> createDate;
+    
+    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+    private List<LocalDate> updateDate;
+    
+    public enum SearchableColumn {
+        SAMPLE_CODE,
+        SAMPLE_NAME,
+        DESCRIPTION
+    }
+}
+```
+
+### 예시 5: 특수 목적 RequestDto
+```java
+// 가시성 변경용
+@Getter
+@AllArgsConstructor
+@NoArgsConstructor
+public class SampleVisibilityRequestDto {
+    @NotNull
+    private StatusCode statusCode;
+}
+
+// 파일 업로드 포함
+@Getter
+@Builder
+@AllArgsConstructor
+@NoArgsConstructor
+public class SampleCreateWithFileRequestDto {
+    @NotBlank
+    private String sampleName;
+    
+    @NotNull
+    private List<String> fileId;  // 파일 ID 리스트
+}
+```
+
+## 7. 주의사항
+
+### @Setter 사용
+```java
+// ❌ RequestDto에 @Setter 사용 지양
+@Getter
+@Setter
+public class SampleCreateRequestDto {
+    private String sampleName;
+}
+
+// ✅ @AllArgsConstructor 사용 권장
+@Getter
+@AllArgsConstructor
+public class SampleCreateRequestDto {
+    private String sampleName;
+}
+
+// ✅ SearchRequestDto는 예외 (@Setter 필수)
+@Getter
+@Setter
+@NoArgsConstructor
+public class SampleSearchRequestDto {
+    private String keyword;
+}
+```
+
+### 검증 어노테이션 선택
+```java
+// ✅ 문자열은 @NotBlank (공백 체크 포함)
+@NotBlank
+private String sampleName;
+
+// ✅ 객체는 @NotNull
+@NotNull
+private String description;
+
+@NotNull
+private List<String> fileIds;
+
+// ❌ 문자열에 @NotNull 사용 지양 (빈 문자열 허용됨)
+@NotNull  // 지양
+private String sampleName;
+```
+
+### ResponseDto의 불변성
+```java
+// ✅ ResponseDto는 @Getter만 (불변)
+@Getter
+@Builder
+public class SampleResponseDto {
+    private String sampleId;
+}
+
+// ❌ ResponseDto에 @Setter 사용 금지
+@Getter
+@Setter  // 금지
+public class SampleResponseDto {
+    private String sampleId;
+}
+```
+
+### from() 메서드 위치
+```java
+// ✅ ResponseDto에만 from() 메서드
+@Getter
+@Builder
+public class SampleResponseDto {
+    public static SampleResponseDto from(Sample entity) {
+        // ...
+    }
+}
+
+// ❌ RequestDto에 from() 메서드 작성 금지
+// Entity에 from(RequestDto) 메서드를 작성
+```
+
+### 기본값 설정
+```java
+// ✅ SearchRequestDto에 합리적인 기본값
+private Sort.Direction direction = Sort.Direction.ASC;
+private List<SearchableColumn> searchTargetColumns = List.of(...);
+
+// ❌ CreateRequestDto/UpdateRequestDto에 기본값 지양
+// (명시적으로 값을 받아야 함)
+```

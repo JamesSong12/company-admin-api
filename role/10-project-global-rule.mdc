@@ -1,0 +1,63 @@
+---
+alwaysApply: false
+description: "Java Spring Boot 프로젝트 전역으로 적용되는 규칙"
+globs: **/src/**/java/**
+---
+
+## 프로젝트 기본 정보
+- **Spring Boot**: (build.gradle 에서 버전 확인)
+- **JDK**: (build.gradle에서 버전 확인)
+- **Architecture**: Layered Architecture (MVC Pattern)
+- **ORM**: JPA (Spring Data JPA) + QueryDSL
+- **Build Tool**: Gradle (Wrapper 사용 권장)
+
+## 네이밍 규칙
+- 클래스명: PascalCase
+- 메서드/변수명: camelCase
+- 상수: UPPER_SNAKE_CASE
+- 패키지명: lowercase
+- 테이블명: snake_case
+- URL 경로: kebab-case
+
+## 클래스 역할병 네이밍 예시
+- Entity: `TaxOrganization` (DB 테이블과 1:1 매핑)
+- 요청 Dto: `TaxOrganizationRequestDto` (반드시 RequestDto.java로 끝나야함)
+- 응답 Dto: `TaxOrganizationResponseDto` (반드시 ResponseDto.java로 끝나야함)
+- Repository: `TaxOrganizationRepository` (반드시 Repository.java로 끝나야함)
+- Service: `TaxOrganizationService` (반드시 Service.java로 끝나야함)
+- Controller: `TaxOrganizationController` (반드시 Controller.java로 끝나야함)
+
+## 패키지 구조 예시
+com.t4x.sample
+├── common
+│   ├── config
+│   │   ├── SampleAConfig.java
+│   │   └── SampleBConfig.java
+│   ├── exception
+│   │   ├── GlobalExceptionHandler.java
+│   │   └── CustomException.java
+│   └── util
+│       └── SampleUtil.java
+└── domain
+    ├── user
+    │   ├── entity
+    │   │   └── User.java
+    │   ├── model
+    │   │   ├── UserRequestDto.java
+    │   │   └── UserResponseDto.java
+    │   ├── repository
+    │   │   └── UserRepository.java
+    │   ├── service
+    │   │   └── UserService.java
+    │   └── controller
+    │       └── UserController.java
+    └── organization
+        ├── entity
+        │   └── Organization.java
+        ├── model
+        │   ├── OrganizationRequest.java
+        │   └── OrganizationResponse.java
+        ├── repository
+        │   └── OrganizationRepository.java
+        └── service
+            └── OrganizationService.java
